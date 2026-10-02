@@ -67,14 +67,31 @@ export function isModeUpgrade(
   return pending !== current && getEffectiveMode(current, pending) === pending;
 }
 
+// A larger value of the same friction type is a stricter gate. A time window
+// has no value to compare, and the types cannot be ranked against each other.
+function tightens(base: SurveillanceConfig, next: SurveillanceConfig): boolean {
+  return (
+    next.type === base.type && next.type !== "time" && next.value > base.value
+  );
+}
+
 export function getEffectiveSurveillance(
   mainMode: ControlMode,
   mainSurv: SurveillanceConfig,
   subMode: ControlMode,
   subSurv: SurveillanceConfig,
 ): SurveillanceConfig {
-  const effective = getEffectiveMode(mainMode, subMode);
-  return effective === subMode && subMode !== "flexible" ? subSurv : mainSurv;
+  if (isModeUpgrade(mainMode, subMode)) return subSurv;
+  // On a tie the section may only tighten the global gate, so a section set
+  // to the same mode cannot be used to get around the global one.
+  if (
+    subMode === mainMode &&
+    subMode !== "flexible" &&
+    tightens(mainSurv, subSurv)
+  ) {
+    return subSurv;
+  }
+  return mainSurv;
 }
 
 export interface ScheduleEntry {
@@ -100,4 +117,31 @@ export interface BlockedApp {
   surveillance: SurveillanceConfig;
   startTime?: string; // HH:mm
   endTime?: string; // HH:mm
+}
+
+export interface ControlSelection {
+  mode: ControlMode;
+  surveillance: SurveillanceConfig;
+}
+
+/**
+ * The strictest of several controls, for actions that touch every section.
+ * Pass the global control first: the first restricted gate is the floor, a
+ * later one only tightens it with a larger value of the same type, and a
+ * flexible control contributes nothing. Between different friction types
+ * the earlier one stands, since they cannot be ranked.
+ */
+export function strictestControl(
+  controls: ControlSelection[],
+): ControlSelection {
+  return controls.reduce((acc, c) => {
+    if (c.mode === "flexible") return acc;
+    if (acc.mode === "flexible") return c;
+    return {
+      mode: isModeUpgrade(acc.mode, c.mode) ? c.mode : acc.mode,
+      surveillance: tightens(acc.surveillance, c.surveillance)
+        ? c.surveillance
+        : acc.surveillance,
+    };
+  });
 }

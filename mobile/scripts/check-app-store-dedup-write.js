@@ -4,6 +4,7 @@ const assert = require("node:assert");
 const {
   incrementBlockedStats,
   partializeAppState,
+  daysCleanSince,
 } = require("../stores/appStorePersistence.ts");
 const { isUnchanged, recordWritten } = require("../db/dedupeWrite.ts");
 
@@ -37,7 +38,10 @@ const baseState = {
 };
 
 // Two real blocked events via the real reducer used by incrementBlocked().
-const afterOne = { ...baseState, stats: incrementBlockedStats(baseState.stats) };
+const afterOne = {
+  ...baseState,
+  stats: incrementBlockedStats(baseState.stats),
+};
 const afterTwo = { ...afterOne, stats: incrementBlockedStats(afterOne.stats) };
 
 // Sanity: the two events must have actually changed something, so the
@@ -78,6 +82,40 @@ assert.strictEqual(
   true,
   "a confirmed write is skipped next time",
 );
-assert.strictEqual(isUnchanged("v2"), false, "a different value is not unchanged");
+assert.strictEqual(
+  isUnchanged("v2"),
+  false,
+  "a different value is not unchanged",
+);
+
+assert.strictEqual(
+  daysCleanSince(
+    "2026-01-01T00:00:00.000Z",
+    new Date("2026-01-03T12:00:00.000Z"),
+  ),
+  2,
+  "two full days",
+);
+assert.strictEqual(
+  daysCleanSince(
+    "2026-01-01T00:00:00.000Z",
+    new Date("2026-01-01T06:00:00.000Z"),
+  ),
+  0,
+  "same day",
+);
+assert.strictEqual(
+  daysCleanSince("not a date", new Date()),
+  0,
+  "unparsable cleanSince reads as zero",
+);
+assert.strictEqual(
+  daysCleanSince(
+    "2026-01-05T00:00:00.000Z",
+    new Date("2026-01-01T00:00:00.000Z"),
+  ),
+  0,
+  "a future cleanSince never goes negative",
+);
 
 console.log("appStorePersistence/dedupeWrite: all checks passed");

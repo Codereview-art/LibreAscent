@@ -36,3 +36,10 @@ export function mergeAppState(
     stats: { ...currentState.stats, ...persisted?.stats },
   };
 }
+
+/** Whole days since cleanSince; the stored daysClean is never advanced, so the dashboard derives it. */
+export function daysCleanSince(cleanSince: string, now: Date): number {
+  const since = Date.parse(cleanSince);
+  if (Number.isNaN(since)) return 0;
+  return Math.max(0, Math.floor((now.getTime() - since) / 86_400_000));
+}

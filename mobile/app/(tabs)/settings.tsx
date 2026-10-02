@@ -8,6 +8,7 @@ import {
   useBlockingStore,
   type BlockingState,
 } from "@/stores/useBlockingStore";
+import { strictestControl } from "@/types/blocking";
 import * as FreedomAccessibility from "@/modules/freedom-accessibility-service/src";
 import * as FreedomDeviceAdmin from "@/modules/freedom-device-admin/src";
 import * as FreedomForeground from "@/modules/freedom-foreground-service/src";
@@ -47,6 +48,7 @@ export default function SettingsScreen(): ReactNode {
     setAppLockType,
     setAppLockHash,
     controlMode,
+    surveillance,
     appThemeId,
     customTheme,
     overlayCustomImage,
@@ -60,9 +62,23 @@ export default function SettingsScreen(): ReactNode {
     includedUrls,
     excludedUrls,
     adultBlockingEnabled,
+    adultControlMode,
+    adultSurveillance,
+    siteControlMode,
+    siteSurveillance,
+    reelsControlMode,
+    reelsSurveillance,
     sources,
     importSettings,
   } = useBlockingStore();
+  // Import and Banking touch every section, so they take the strictest gate
+  // configured anywhere, not only the global one.
+  const strictest = strictestControl([
+    { mode: controlMode, surveillance },
+    { mode: adultControlMode, surveillance: adultSurveillance },
+    { mode: siteControlMode, surveillance: siteSurveillance },
+    { mode: reelsControlMode, surveillance: reelsSurveillance },
+  ]);
   const adBlockEnabled = useBlockingStore(
     (s) => s.categories.find((c) => c.id === "ads")?.enabled ?? false,
   );
@@ -71,7 +87,7 @@ export default function SettingsScreen(): ReactNode {
   const router = useRouter();
 
   const [pendingAction, setPendingAction] = useState<
-    "boot" | "applock" | "adblock" | null
+    "boot" | "applock" | "adblock" | "banking" | "import" | null
   >(null);
 
   const [bankingActive, setBankingActive] = useState(false);
@@ -183,6 +199,13 @@ export default function SettingsScreen(): ReactNode {
       return;
     }
     if (enable) {
+      // Banking pauses the accessibility service, which enforces app, URL and
+      // keyword blocking and Hardcore's settings protection, so starting it is
+      // a weakening and takes the same friction as any other.
+      if (strictest.mode !== "flexible") {
+        setPendingAction("banking");
+        return;
+      }
       void startBanking();
     } else {
       void endBanking();
@@ -206,7 +229,13 @@ export default function SettingsScreen(): ReactNode {
 
   const toggleBoot = (): void => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setAutoStart(!autoStartOnBoot);
+    const next = !autoStartOnBoot;
+    setAutoStart(next);
+    // The boot receiver keeps its own flag; without this the switch only ever
+    // changed the JS copy.
+    void FreedomForeground.setAutoStart(next).catch((e: unknown) => {
+      console.warn("[Settings] Auto-start sync failed:", e);
+    });
     setPendingAction(null);
   };
 
@@ -235,10 +264,10 @@ export default function SettingsScreen(): ReactNode {
           await BlocklistService.syncVpnCategoryToggle("ads", true);
           await BlocklistService.syncCategoryFlagsToNative();
         }
-        // updateBlocklists swallows per-source fetch errors and resolves
-        // true, so verify domains actually landed rather than trusting the
-        // call. Empty cache means the fetch failed — the toggle must not
-        // claim protection it isn't providing.
+        // The return value only says whether every source fetched, so verify
+        // the ad domains actually landed rather than trusting the call. Empty
+        // cache means the fetch failed — the toggle must not claim protection
+        // it isn't providing.
         if (!hasCachedDomains("ads")) {
           throw new Error("No ad domains synced");
         }
@@ -390,7 +419,7 @@ export default function SettingsScreen(): ReactNode {
     }
   };
 
-  const handleImport = async (): Promise<void> => {
+  const runImport = async (): Promise<void> => {
     try {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const result = await DocumentPicker.getDocumentAsync({
@@ -436,6 +465,16 @@ export default function SettingsScreen(): ReactNode {
         "Failed to import settings. Ensure the file is a valid LibreAscent settings JSON.",
       );
     }
+  };
+
+  const handleImport = (): void => {
+    // An imported file can switch every protection off at once, so it takes
+    // the same friction as switching one off by hand.
+    if (strictest.mode !== "flexible") {
+      setPendingAction("import");
+      return;
+    }
+    void runImport();
   };
 
   const openRepo = (): void => {
@@ -1118,19 +1157,36 @@ export default function SettingsScreen(): ReactNode {
       </Modal>
 
       <InteractionGuard
+        key={pendingAction ?? "idle"}
         visible={pendingAction !== null}
         actionName={
           pendingAction === "boot"
             ? "Disable Auto-start"
             : pendingAction === "applock"
               ? "Disable App Lock"
-              : "Disable Ad Blocking"
+              : pendingAction === "banking"
+                ? "Pause Protection for Banking"
+                : pendingAction === "import"
+                  ? "Import Settings"
+                  : "Disable Ad Blocking"
         }
         onSuccess={() => {
           if (pendingAction === "boot") toggleBoot();
           else if (pendingAction === "applock") disableAppLock();
           else if (pendingAction === "adblock") void applyAdBlock(false);
+          else if (pendingAction === "banking") {
+            setPendingAction(null);
+            void startBanking();
+          } else if (pendingAction === "import") {
+            setPendingAction(null);
+            void runImport();
+          }
         }}
+        surveillanceOverride={
+          pendingAction === "banking" || pendingAction === "import"
+            ? strictest.surveillance
+            : undefined
+        }
         onCancel={() => {
           setPendingAction(null);
         }}
