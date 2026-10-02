@@ -258,10 +258,10 @@ export default function SettingsScreen(): ReactNode {
           await BlocklistService.syncVpnCategoryToggle("ads", true);
           await BlocklistService.syncCategoryFlagsToNative();
         }
-        // updateBlocklists swallows per-source fetch errors and resolves
-        // true, so verify domains actually landed rather than trusting the
-        // call. Empty cache means the fetch failed — the toggle must not
-        // claim protection it isn't providing.
+        // The return value only says whether every source fetched, so verify
+        // the ad domains actually landed rather than trusting the call. Empty
+        // cache means the fetch failed — the toggle must not claim protection
+        // it isn't providing.
         if (!hasCachedDomains("ads")) {
           throw new Error("No ad domains synced");
         }

@@ -146,9 +146,12 @@ export default function UpdateSourcesScreen(): React.ReactNode {
       );
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
+      const reason = BlocklistService.lastFetchErrors[0];
       showAlert(
         "Update Failed",
-        "Failed to update some sources. Check your internet connection.",
+        reason
+          ? `${reason}\n\nCheck your connection and try again.`
+          : "Failed to update some sources. Check your internet connection.",
         "error",
       );
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);

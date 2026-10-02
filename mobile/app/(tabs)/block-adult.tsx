@@ -151,9 +151,12 @@ export default function BlockAdultScreen(): ReactNode {
         "success",
       );
     } else {
+      const reason = BlocklistService.lastFetchErrors[0];
       showAlert(
         "Update Failed",
-        "Failed to update blocklists. Please check your internet connection.",
+        reason
+          ? `${reason}\n\nCheck your connection and try again.`
+          : "Failed to update blocklists. Please check your internet connection.",
         "error",
       );
     }
@@ -194,8 +197,10 @@ export default function BlockAdultScreen(): ReactNode {
 
   const modeLabel = CONTROL_MODES.find((m) => m.id === adultControlMode);
 
-  const totalDomains = Object.values(categoryDomainCounts).reduce(
-    (sum, count) => sum + count,
+  // The ad list is cached from the first launch on, whether or not ad
+  // blocking is on, and it is not this screen's to count.
+  const totalDomains = Object.entries(categoryDomainCounts).reduce(
+    (sum, [id, count]) => (VPN_ONLY_CATEGORIES.has(id) ? sum : sum + count),
     0,
   );
 

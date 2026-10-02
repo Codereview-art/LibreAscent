@@ -14,6 +14,7 @@ import {
 import * as DeviceAdmin from "@/modules/freedom-device-admin/src";
 import * as FreedomAccessibility from "@/modules/freedom-accessibility-service/src";
 import * as FreedomVpn from "@/modules/freedom-vpn-service/src";
+import { toNativeAppConfigs } from "./appConfigs";
 
 const SUSPENDED_PKGS_KEY = "libreascent.suspendedPkgs";
 import {
@@ -288,26 +289,7 @@ export const BlocklistService = {
   syncAppsToNative: async (): Promise<void> => {
     const state = useBlockingStore.getState();
     try {
-      const configs = state.blockedApps
-        .filter((a) => a.enabled)
-        .map((a) => {
-          const config: {
-            packageName: string;
-            appName: string;
-            surveillanceType: string;
-            surveillanceValue: number;
-            startTime?: string;
-            endTime?: string;
-          } = {
-            packageName: a.packageName,
-            appName: a.appName,
-            surveillanceType: a.surveillance.type,
-            surveillanceValue: a.surveillance.value,
-          };
-          if (a.startTime) config.startTime = a.startTime;
-          if (a.endTime) config.endTime = a.endTime;
-          return config;
-        });
+      const configs = toNativeAppConfigs(state.blockedApps);
       await FreedomAccessibility.updateBlockedApps(configs);
 
       // Tier A: Device Owner users get true per-app suspension. Suspend is
@@ -775,22 +757,43 @@ export const BlocklistService = {
   lastFetchErrors: [] as string[],
 
   /**
-   * Refetch the enabled sources when the last fetch is older than
-   * UPDATE_INTERVAL_MS. Only lists that have been fetched before: the first
-   * fetch stays where it is, on enabling a category. Without this the phone
-   * blocked from whatever the first fetch returned, indefinitely — omg.porn
-   * was added to oisd in mid 2026 and a phone that fetched before that never
-   * learned of it.
+   * Refetch the enabled sources when the lists have never been fetched or the
+   * last fetch is older than UPDATE_INTERVAL_MS. The bundled data/ files are
+   * comment-only, so a phone that has never fetched blocks no adult domains at
+   * all. Without the age check the phone blocked from whatever the first fetch
+   * returned, indefinitely — omg.porn was added to oisd in mid 2026 and a
+   * phone that fetched before that never learned of it.
    */
   refreshIfStale: async (): Promise<boolean> => {
     const last = getLastBlocklistUpdate();
-    if (last === 0 || Date.now() - last < UPDATE_INTERVAL_MS) return false;
+    if (last !== 0 && Date.now() - last < UPDATE_INTERVAL_MS) return false;
     return BlocklistService.updateBlocklists();
   },
 
-  updateBlocklists: async (
+  _updateInFlight: null as Promise<boolean> | null,
+  _onProgress: undefined as
+    | ((progress: number, total: number, name: string) => void)
+    | undefined,
+
+  updateBlocklists: (
     onProgress?: (progress: number, total: number, name: string) => void,
   ): Promise<boolean> => {
+    // One fetch at a time: the launch refresh and a manual tap must not run
+    // the same download and resync twice or read each other's errors. The
+    // latest caller's progress callback is the one the run reports to.
+    if (onProgress) BlocklistService._onProgress = onProgress;
+    if (!BlocklistService._updateInFlight) {
+      BlocklistService._updateInFlight = BlocklistService._runUpdate().finally(
+        () => {
+          BlocklistService._updateInFlight = null;
+          BlocklistService._onProgress = undefined;
+        },
+      );
+    }
+    return BlocklistService._updateInFlight;
+  },
+
+  _runUpdate: async (): Promise<boolean> => {
     BlocklistService.lastFetchErrors = [];
     try {
       const state = useBlockingStore.getState();
@@ -808,7 +811,11 @@ export const BlocklistService = {
       // Phase 1: Check each source for changes
       for (let i = 0; i < enabledSources.length; i++) {
         const source = enabledSources[i];
-        onProgress?.(i + 1, total, `Checking ${source.name}...`);
+        BlocklistService._onProgress?.(
+          i + 1,
+          total,
+          `Checking ${source.name}...`,
+        );
         await new Promise((r) => setTimeout(r, 0));
 
         const categoryId = BlocklistService.getCategoryForSource(source);
@@ -858,7 +865,7 @@ export const BlocklistService = {
       }
 
       // Phase 2: Re-sync dirty categories from SQLite to native
-      onProgress?.(total, total, "Syncing to native...");
+      BlocklistService._onProgress?.(total, total, "Syncing to native...");
       await new Promise((r) => setTimeout(r, 0));
 
       const categoryIds = useBlockingStore
@@ -888,10 +895,21 @@ export const BlocklistService = {
           /* ignore */
         }
 
-        await BlocklistService.syncCategoryFromCache(categoryId, {
-          syncVpn: true,
-          syncAccessibility: !vpnOnly,
-        });
+        // The VPN has no per-category switch: a category it holds is blocked.
+        // Only an active one goes in; the cache keeps the rest for the toggle
+        // that turns them on (same rule as syncAllCategoriesFromCache). A
+        // VPN-only category that is off has nowhere to go, so skip the paging.
+        const current = useBlockingStore.getState();
+        const active =
+          (categoryId === "ads" || current.adultBlockingEnabled) &&
+          (current.categories.find((c) => c.id === categoryId)?.enabled ??
+            false);
+        if (active || !vpnOnly) {
+          await BlocklistService.syncCategoryFromCache(categoryId, {
+            syncVpn: active,
+            syncAccessibility: !vpnOnly,
+          });
+        }
 
         if (!vpnOnly) {
           try {
@@ -948,8 +966,12 @@ export const BlocklistService = {
         console.warn("[BlocklistService] Failed to sync URLs:", e);
       }
 
-      setLastBlocklistUpdate();
-      return true;
+      // A source that failed to fetch is not "updated": say so, and leave the
+      // stamp alone so refreshIfStale tries again on the next launch instead of
+      // in seven days. Sources that did fetch are already synced above.
+      const ok = BlocklistService.lastFetchErrors.length === 0;
+      if (ok) setLastBlocklistUpdate();
+      return ok;
     } catch (error) {
       console.error("[BlocklistService] Failed to update blocklists:", error);
       return false;

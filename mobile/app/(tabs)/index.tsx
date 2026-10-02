@@ -1,6 +1,7 @@
 import { useAppTheme } from "@/providers/ThemeProvider";
 import { ProtectionService } from "@/services/ProtectionService";
 import { useAppStore } from "@/stores/useAppStore";
+import { daysCleanSince } from "@/stores/appStorePersistence";
 import { useBlockingStore } from "@/stores/useBlockingStore";
 import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps, ReactNode } from "react";
@@ -15,17 +16,33 @@ export default function DashboardScreen(): ReactNode {
   const domainsBlockedCount = useBlockingStore(
     (state) => state.includedUrls.length,
   );
+  const adultBlockingEnabled = useBlockingStore(
+    (state) => state.adultBlockingEnabled,
+  );
+  const adultDomainCount = useBlockingStore(
+    (state) => state.categoryDomainCounts.adult ?? 0,
+  );
+  const adultCategoryEnabled = useBlockingStore(
+    (state) => state.categories.find((c) => c.id === "adult")?.enabled ?? false,
+  );
 
   const isScheduled = ProtectionService.isProtectionEnabledBySchedule();
   const hasSchedule = schedule.length > 0;
   const coreProtectionActive =
     protection.vpn && protection.accessibility && protection.foregroundService;
-  const isProtectionActive = isScheduled && coreProtectionActive;
+  // Adult blocking with no domains loaded blocks nothing; a fresh install is
+  // in this state until the first blocklist fetch lands.
+  const blocklistsMissing =
+    adultBlockingEnabled && adultCategoryEnabled && adultDomainCount === 0;
+  const isProtectionActive =
+    isScheduled && coreProtectionActive && !blocklistsMissing;
   const statusLabel = !isScheduled
     ? "Protection Paused"
     : isProtectionActive
       ? "Protection Active"
-      : "Protection Needs Setup";
+      : coreProtectionActive
+        ? "Blocklists Not Loaded"
+        : "Protection Needs Setup";
 
   const modeInfo = {
     flexible: {
@@ -127,6 +144,12 @@ export default function DashboardScreen(): ReactNode {
               VPN, Accessibility, and foreground service must all be active.
             </Text>
           )}
+          {isScheduled && coreProtectionActive && blocklistsMissing && (
+            <Text className="mt-2 text-xs" style={{ color: t.warningColor }}>
+              No adult domains are loaded yet. Open the Safe tab and tap Update
+              Blocklists.
+            </Text>
+          )}
         </View>
 
         {/* Stats Row */}
@@ -143,7 +166,7 @@ export default function DashboardScreen(): ReactNode {
               Days Clean
             </Text>
             <Text className="text-3xl font-bold" style={{ color: t.textColor }}>
-              {stats.daysClean}
+              {daysCleanSince(stats.cleanSince, new Date())}
             </Text>
           </View>
           <View
