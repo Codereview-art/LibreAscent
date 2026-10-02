@@ -20,4 +20,34 @@ class SettingsProtectorTest {
 
         assertTrue(protector.shouldBlockSettingsTextsForTest(texts))
     }
+
+    @Test
+    fun samsungAccessibilityPackageIsRecognizedAsSettings() {
+        assertTrue(SettingsProtector().matchesSettingsPkg("com.samsung.accessibility"))
+    }
+
+    @Test
+    fun miuiSecurityCenterPackageIsRecognizedAsSettings() {
+        assertTrue(SettingsProtector().matchesSettingsPkg("com.miui.securitycenter"))
+    }
+
+    @Test
+    fun aospSettingsPackagesAreStillRecognized() {
+        val protector = SettingsProtector()
+        assertTrue(protector.matchesSettingsPkg("com.android.settings"))
+        assertTrue(protector.matchesSettingsPkg("com.google.android.settings"))
+    }
+
+    @Test
+    fun unrelatedPackageIsNotRecognizedAsSettings() {
+        assertFalse(SettingsProtector().matchesSettingsPkg("com.android.chrome"))
+    }
+
+    @Test
+    fun deviceAdminDeactivationForLibreAscentIsBlocked() {
+        val protector = SettingsProtector()
+        val texts = listOf("Device admin app", "LibreAscent", "Deactivate this device admin app")
+
+        assertTrue(protector.shouldBlockSettingsTextsForTest(texts))
+    }
 }

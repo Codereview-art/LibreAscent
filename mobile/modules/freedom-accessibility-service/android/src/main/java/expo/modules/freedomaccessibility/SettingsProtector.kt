@@ -65,7 +65,8 @@ class SettingsProtector {
         )
 
         private val SETTINGS_PKGS = listOf(
-            "settings", "manageapp", "applications", "com.google.android.settings"
+            "settings", "manageapp", "applications", "com.google.android.settings",
+            "accessibility", "securitycenter"
         )
     }
 
@@ -128,7 +129,7 @@ class SettingsProtector {
         }
 
         // --- Handle Settings app ---
-        if (!SETTINGS_PKGS.any { pkg.contains(it) }) return
+        if (!matchesSettingsPkg(pkg)) return
 
         val allText = collectAllText(rootNode)
 
@@ -154,6 +155,14 @@ class SettingsProtector {
             return
         }
 
+        // Device admin deactivation for Freedom on OEM screens whose activity
+        // class name differs from AOSP's, so checkActivityClass never flags them.
+        if (containsAny(allText, DEVICE_ADMIN_TRIGGERS)) {
+            Log.w(TAG, "Protection: Device Admin action for Freedom! Navigating back.")
+            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            return
+        }
+
         // Accessibility settings for Freedom. Keep this narrow: network/VPN
         // settings can show "LibreAscent" and "Off" without being tamper UI.
         if (shouldBlockAccessibilitySettings(allText)) {
@@ -174,6 +183,10 @@ class SettingsProtector {
         return containsFreedom(texts) &&
             containsAny(texts, ACCESSIBILITY_CONTEXT_TRIGGERS) &&
             containsAny(texts, ACCESSIBILITY_TRIGGERS)
+    }
+
+    internal fun matchesSettingsPkg(pkg: String): Boolean {
+        return SETTINGS_PKGS.any { pkg.contains(it) }
     }
 
     private fun collectAllText(node: AccessibilityNodeInfo, depth: Int = 0): List<String> {
