@@ -97,4 +97,31 @@ class BlocklistPersistenceTest {
         assertTrue(blocklist.isBlocked("category-domain.com"), "category must load")
         assertTrue(blocklist.isBlocked("user-added.com"), "JS push must survive")
     }
+
+    @Test
+    fun categoryDomainCountIsWhatWasPushedNotWhatTheSetKept() {
+        // Launch skips the re-push when this equals the SQLite count, which is
+        // taken before the VPN's normalization, so www. twins must count twice
+        // here even though the set keeps one.
+        BlocklistPersistence.saveCategory(dir, "adult", listOf("example.com", "www.example.com"), true)
+        BlocklistPersistence.saveCategory(dir, "adult", listOf("other.net"), false)
+
+        val loaded = DomainBlocklist()
+        BlocklistPersistence.load(dir, loaded)
+        assertEquals(2, loaded.size(), "the set collapses the twins")
+        assertEquals(3, BlocklistPersistence.categoryDomainCount(dir, "adult"))
+        assertEquals(0, BlocklistPersistence.categoryDomainCount(dir, "ads"), "never pushed")
+
+        BlocklistPersistence.saveCategory(dir, "adult", listOf("fresh.example"), true)
+        assertEquals(1, BlocklistPersistence.categoryDomainCount(dir, "adult"), "replace starts over")
+    }
+
+    @Test
+    fun aCategoryFileCutShortByAKillCountsShort() {
+        // So the mismatch gets it pushed again rather than loaded as is.
+        BlocklistPersistence.saveCategory(dir, "adult", listOf("a.example", "b.example"), true)
+        File(dir, "category_adult.txt").appendText("c.exam")
+
+        assertEquals(2, BlocklistPersistence.categoryDomainCount(dir, "adult"))
+    }
 }

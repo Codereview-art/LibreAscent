@@ -207,6 +207,15 @@ class FreedomVpnModule : Module() {
         AsyncFunction("getBlocklistSize") { promise: Promise ->
             promise.resolve(FreedomVpnService.blocklist.size())
         }
+
+        AsyncFunction("getCategoryDomainCount") { name: String, promise: Promise ->
+            val context = appContext.reactContext
+                ?: run {
+                    promise.resolve(0)
+                    return@AsyncFunction
+                }
+            promise.resolve(BlocklistPersistence.categoryDomainCount(context, name))
+        }
     }
 
     /**

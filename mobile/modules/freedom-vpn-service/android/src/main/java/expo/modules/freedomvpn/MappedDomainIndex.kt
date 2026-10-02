@@ -55,7 +55,7 @@ class MappedDomainIndex private constructor(
     companion object {
         private const val TAG = "MappedDomainIndex"
 
-        /** Bumped if the layout ever changes, so stale files rebuild instead of misreading. */
+        /** Bumped if the layout, hashing or normalization ever changes; indexes outlive app updates, so stale ones must rebuild rather than be misread. */
         private const val MAGIC = 0x4C41494E44583031L
         private const val HEADER_BYTES = 16L
 

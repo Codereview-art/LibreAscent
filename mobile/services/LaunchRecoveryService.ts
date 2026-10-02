@@ -22,6 +22,7 @@ export interface LaunchRecoveryReport {
   vpnActiveAfter: boolean;
   cachedDomainCounts: Record<string, number>;
   nativeDomainCounts: Record<string, number>;
+  vpnDomainCounts: Record<string, number>;
   accessibilitySnapshotBefore: Awaited<
     ReturnType<typeof FreedomAccessibility.getProtectionSnapshot>
   >;
@@ -95,6 +96,7 @@ export const LaunchRecoveryService = {
 
     const cachedDomainCounts: Record<string, number> = {};
     const nativeDomainCounts: Record<string, number> = {};
+    const vpnDomainCounts: Record<string, number> = {};
 
     for (const category of useBlockingStore.getState().categories) {
       cachedDomainCounts[category.id] = getCachedDomainCount(category.id);
@@ -104,8 +106,18 @@ export const LaunchRecoveryService = {
         0,
         () => FreedomAccessibility.getCategoryDomainCount(category.id),
       );
+      vpnDomainCounts[category.id] = await safePhase(
+        `vpn-count:${category.id}`,
+        startedAt,
+        0,
+        () => FreedomVpn.getCategoryDomainCount(category.id),
+      );
     }
-    logPhase("counts", startedAt, { cachedDomainCounts, nativeDomainCounts });
+    logPhase("counts", startedAt, {
+      cachedDomainCounts,
+      nativeDomainCounts,
+      vpnDomainCounts,
+    });
 
     const accessibilityEnabled = await safePhase(
       "accessibility-check",
@@ -170,6 +182,7 @@ export const LaunchRecoveryService = {
       BlocklistService.syncAllCategoriesFromCache({
         skipMatchingNative: true,
         nativeCounts: nativeDomainCounts,
+        vpnCounts: vpnDomainCounts,
       }),
     );
     ProtectionService.snapshotCategoryContent();
@@ -235,6 +248,7 @@ export const LaunchRecoveryService = {
       vpnActiveAfter,
       cachedDomainCounts,
       nativeDomainCounts,
+      vpnDomainCounts,
       accessibilitySnapshotBefore,
       accessibilitySnapshotAfter,
     };

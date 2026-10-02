@@ -70,6 +70,32 @@ object BlocklistPersistence {
         }
     }
 
+    /**
+     * Lines in the category's file: one per domain JS pushed. Launch compares
+     * it to the SQLite count to decide whether to push again, so it counts what
+     * was received rather than what the hashed set kept: the set drops `www.`
+     * twins, and StevenBlack's adult list alone carries 12.5k of them. A file
+     * cut short by a kill counts short and is pushed again.
+     */
+    fun categoryDomainCount(context: Context, name: String): Int =
+        categoryDomainCount(dir(context), name)
+
+    internal fun categoryDomainCount(dir: File, name: String): Int {
+        val file = categoryFile(dir, name)
+        if (!file.exists()) return 0
+        val newline = '\n'.code.toByte()
+        var lines = 0
+        try {
+            file.forEachBlock(64 * 1024) { buffer, read ->
+                for (i in 0 until read) if (buffer[i] == newline) lines++
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to count category $name: ${e.message}")
+            return 0
+        }
+        return lines
+    }
+
     fun saveUserDomains(context: Context, domains: List<String>) =
         saveList(context, USER_FILE, domains)
 
@@ -128,8 +154,17 @@ object BlocklistPersistence {
 
         if (index != null) {
             if (!index.exists()) {
+                // A push appending while this reads would leave an index of
+                // part of the file, and launch no longer re-pushes a file whose
+                // line count is right, so it would stand. Whoever changed the
+                // file has already updated the live set; leave it to them.
+                val lengthBefore = file.length()
                 file.bufferedReader().useLines { lines ->
                     MappedDomainIndex.build(lines, index) { blocklist.normalizeDomain(it) }
+                }
+                if (file.length() != lengthBefore) {
+                    index.delete()
+                    return
                 }
             }
             val mapped = MappedDomainIndex.open(index)

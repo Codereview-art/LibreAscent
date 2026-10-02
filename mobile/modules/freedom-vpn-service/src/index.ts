@@ -17,6 +17,7 @@ interface FreedomVpnModuleInterface {
   setWhitelist(domains: string[]): Promise<void>;
   getBlockedCount(): Promise<number>;
   getBlocklistSize(): Promise<number>;
+  getCategoryDomainCount(name: string): Promise<number>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -103,6 +104,12 @@ export async function getBlockedCount(): Promise<number> {
 export async function getBlocklistSize(): Promise<number> {
   if (!FreedomVpnNative) return 0;
   return FreedomVpnNative.getBlocklistSize();
+}
+
+/** Domains in the category's file on disk: what JS last pushed, line for line. */
+export async function getCategoryDomainCount(name: string): Promise<number> {
+  if (!FreedomVpnNative) return 0;
+  return FreedomVpnNative.getCategoryDomainCount(name);
 }
 
 // Event listeners — wired to native module BroadcastReceiver events

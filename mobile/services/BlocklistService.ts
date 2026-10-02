@@ -687,6 +687,7 @@ export const BlocklistService = {
   syncAllCategoriesFromCache: async (options?: {
     skipMatchingNative?: boolean;
     nativeCounts?: Record<string, number>;
+    vpnCounts?: Record<string, number>;
   }): Promise<void> => {
     const state = useBlockingStore.getState();
 
@@ -697,19 +698,29 @@ export const BlocklistService = {
       const cached = getCachedDomainCount(category.id);
       if (cached === 0) continue;
 
+      // The tunnel refills its categories from its own files at start, so a
+      // file holding every cached domain needs no re-push.
+      // ponytail: equal counts stand in for equal content. A refresh that
+      // swaps domains one for one and dies before its push is skipped until
+      // the list next changes upstream; a per-category content hash closes it.
+      const vpnAlreadyCurrent =
+        options?.skipMatchingNative &&
+        options.vpnCounts?.[category.id] === cached;
+
       if (VPN_ONLY_CATEGORIES.has(category.id)) {
         try {
-          await FreedomVpn.removeCategory(category.id);
           // Remove any stale accessibility file left by an older build that
           // pushed this category to the matcher.
           await FreedomAccessibility.clearCategoryDomains(category.id);
         } catch {
           /* might not exist */
         }
-        await BlocklistService.syncCategoryFromCache(category.id, {
-          syncVpn: true,
-          syncAccessibility: false,
-        });
+        if (!vpnAlreadyCurrent) {
+          await BlocklistService.syncCategoryFromCache(category.id, {
+            syncVpn: true,
+            syncAccessibility: false,
+          });
+        }
         useBlockingStore.getState().setCategoryDomainCount(category.id, cached);
         continue;
       }
@@ -723,16 +734,14 @@ export const BlocklistService = {
       const accessibilityAlreadyCurrent =
         options?.skipMatchingNative && existingNativeCount === cached;
 
-      try {
-        await FreedomVpn.removeCategory(category.id);
-      } catch {
-        /* might not exist */
+      // No clear first: addCategory's first page replaces the category, so
+      // the old set keeps serving until that page lands.
+      if (!vpnAlreadyCurrent || !accessibilityAlreadyCurrent) {
+        await BlocklistService.syncCategoryFromCache(category.id, {
+          syncVpn: !vpnAlreadyCurrent,
+          syncAccessibility: !accessibilityAlreadyCurrent,
+        });
       }
-
-      await BlocklistService.syncCategoryFromCache(category.id, {
-        syncVpn: true,
-        syncAccessibility: !accessibilityAlreadyCurrent,
-      });
 
       if (accessibilityAlreadyCurrent) {
         useBlockingStore
@@ -740,7 +749,7 @@ export const BlocklistService = {
           .setCategoryDomainCount(category.id, existingNativeCount);
         // eslint-disable-next-line no-console
         console.log(
-          `[BlocklistService] ${category.id}: accessibility cache already current (${existingNativeCount}); VPN cache reloaded`,
+          `[BlocklistService] ${category.id}: accessibility cache already current (${existingNativeCount}); VPN ${vpnAlreadyCurrent ? "already current" : "cache reloaded"}`,
         );
         continue;
       }
