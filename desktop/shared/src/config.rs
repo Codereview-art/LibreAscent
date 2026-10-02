@@ -157,27 +157,37 @@ pub fn default_config_path() -> PathBuf {
     PathBuf::from("LibreAscent").join("config.json")
 }
 
+fn io_error(error: std::io::Error) -> serde_json::Error {
+    serde::de::Error::custom(error)
+}
+
 pub fn load_or_create(path: &std::path::Path) -> serde_json::Result<DesktopConfig> {
     if path.exists() {
-        if let Ok(text) = std::fs::read_to_string(path) {
-            if let Ok(config) = serde_json::from_str(&text) {
-                return Ok(config);
-            }
-        }
+        // A file that exists but does not read or parse is never replaced: it
+        // may be a save the UI is still writing, or a hand edit. The error
+        // goes back to the caller; the file is left for the user to fix.
+        let text = std::fs::read_to_string(path).map_err(io_error)?;
+        let mut config: DesktopConfig = serde_json::from_str(&text)?;
+        config.clamp_friction();
+        return Ok(config);
     }
 
     let config = default_config();
-    let _ = save(path, &config);
+    save(path, &config)?;
     Ok(config)
 }
 
 pub fn save(path: &std::path::Path, config: &DesktopConfig) -> serde_json::Result<()> {
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent).map_err(io_error)?;
     }
 
+    // Write beside the target and rename so a reader polling the file never
+    // sees a partial document.
     let text = serde_json::to_string_pretty(config)?;
-    let _ = std::fs::write(path, text);
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, text).map_err(io_error)?;
+    std::fs::rename(&tmp, path).map_err(io_error)?;
     Ok(())
 }
 
@@ -235,7 +245,7 @@ impl DesktopConfig {
         self.control_mode == ControlMode::Flexible
     }
 
-    // ponytail: config.json is hand-editable; clamp so UI steppers and manual
+    // ponytail: config.json is hand-editable; clamp on load and on the UI write
     // edits can't set friction weaker than the floor. Bounds mirror Settings.tsx.
     pub fn clamp_friction(&mut self) {
         self.friction.countdown_seconds = self.friction.countdown_seconds.clamp(5, 3600);
@@ -527,6 +537,47 @@ mod tests {
         assert_eq!(config.friction_window.end_hour, 23);
         assert_eq!(config.friction_window.countdown_seconds, 5);
         assert_eq!(config.friction_window.click_count, 1);
+    }
+
+    #[test]
+    fn unparsable_config_is_kept_and_reported() {
+        let path = temp_path("broken-config.json");
+        std::fs::write(&path, "{ not json").expect("write");
+
+        let result = load_or_create(&path);
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "{ not json");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_round_trips_and_leaves_no_temp_file() {
+        let path = temp_path("atomic-config.json");
+        let _ = std::fs::remove_file(&path);
+
+        save(&path, &default_config()).expect("config should save");
+
+        assert!(path.exists());
+        assert!(!path.with_extension(format!("json.{}.tmp", std::process::id())).exists());
+        let loaded = load_or_create(&path).expect("config should load");
+        assert_eq!(loaded.schema_version, 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_clamps_hand_edited_friction() {
+        let path = temp_path("clamped-config.json");
+        let mut config = default_config();
+        config.friction.countdown_seconds = 0;
+        config.friction.click_count = 0;
+        save(&path, &config).expect("config should save");
+
+        let loaded = load_or_create(&path).expect("config should load");
+
+        assert_eq!(loaded.friction.countdown_seconds, 5);
+        assert_eq!(loaded.friction.click_count, 1);
+        let _ = std::fs::remove_file(path);
     }
 
     fn temp_path(name: &str) -> std::path::PathBuf {
