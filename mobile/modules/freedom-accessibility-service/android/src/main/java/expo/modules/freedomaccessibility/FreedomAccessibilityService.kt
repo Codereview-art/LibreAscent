@@ -273,7 +273,8 @@ class FreedomAccessibilityService : AccessibilityService() {
                 packageName == "com.google.android.settings" ||
                 packageName.contains("packageinstaller") ||
                 packageName.contains("settings") ||
-                packageName.contains("manageapp")
+                packageName.contains("manageapp") ||
+                packageName.contains("vpndialogs")
     }
 
     /**
