@@ -96,6 +96,35 @@ class FreedomVpnService : VpnService() {
             "com.whatsapp.w4b"
         )
 
+        /**
+         * Resolvers routed into this tunnel, one host each (/32, /128): the
+         * Cloudflare pair it advertises plus the public resolvers an app, a
+         * browser's DoH setting or a strict Private DNS hostname reaches by IP.
+         * Routed, their UDP 53 is filtered and their TCP 443/853 attempts get
+         * the RST in processIpPacket. Single hosts on purpose: see establishVpn.
+         * ponytail: a fixed list, so a resolver at any other address still
+         * escapes; DomainBlocklist.DOH_BOOTSTRAP_HOSTS covers the by-name path.
+         */
+        internal val ROUTED_RESOLVERS_V4 = listOf(
+            DNS_PRIMARY, DNS_SECONDARY,
+            "8.8.8.8", "8.8.4.4",                 // Google
+            "9.9.9.9", "149.112.112.112",         // Quad9
+            "208.67.222.222", "208.67.220.220",   // OpenDNS
+            "94.140.14.14", "94.140.15.15",       // AdGuard
+            "76.76.2.0", "76.76.10.0",            // ControlD
+            "185.228.168.9", "185.228.169.9"      // CleanBrowsing
+        )
+
+        internal val ROUTED_RESOLVERS_V6 = listOf(
+            DNS_PRIMARY_V6, DNS_SECONDARY_V6,
+            "2001:4860:4860::8888", "2001:4860:4860::8844",   // Google
+            "2620:fe::fe", "2620:fe::9",                      // Quad9
+            "2620:119:35::35", "2620:119:53::53",             // OpenDNS
+            "2a10:50c0::ad1:ff", "2a10:50c0::ad2:ff",         // AdGuard
+            "2606:1a40::", "2606:1a40:1::",                   // ControlD
+            "2a0d:2a00:1::2", "2a0d:2a00:2::2"                // CleanBrowsing
+        )
+
         // Settings.Secure.ALWAYS_ON_VPN_APP is @hide, so name it directly.
         private const val ALWAYS_ON_VPN_APP = "always_on_vpn_app"
 
@@ -559,7 +588,7 @@ class FreedomVpnService : VpnService() {
      * Establish the TUN interface.
      *
      * We configure the VPN to capture DNS traffic by setting the VPN's DNS
-     * servers and routing only those DNS server IPs through the tunnel.
+     * servers and routing only resolver IPs (ROUTED_RESOLVERS_*) through it.
      * VpnService routes by address, not port, so routing 0.0.0.0/0 would send
      * all app and system traffic here. This service only forwards DNS packets,
      * so full-device routing can break non-DNS traffic such as carrier/IMS
@@ -589,9 +618,6 @@ class FreedomVpnService : VpnService() {
                 .setMtu(MTU)
                 // Assign a private IP to the TUN interface
                 .addAddress("10.0.0.2", 32)
-                // Route only our configured DNS resolvers through the VPN.
-                .addRoute(DNS_PRIMARY, 32)
-                .addRoute(DNS_SECONDARY, 32)
                 // Set our own DNS servers (these trigger DNS through the tunnel)
                 .addDnsServer(DNS_PRIMARY)
                 .addDnsServer(DNS_SECONDARY)
@@ -599,13 +625,14 @@ class FreedomVpnService : VpnService() {
                 // nothing about traffic while the tunnel is down. That is what
                 // setAlwaysOn covers.
                 .setBlocking(true)
+            // Route only resolver addresses through the VPN, one host each.
+            ROUTED_RESOLVERS_V4.forEach { builder.addRoute(it, 32) }
 
             if (withIpv6) {
                 builder.addAddress(TUN_ADDRESS_V6, 128)
-                    .addRoute(DNS_PRIMARY_V6, 128)
-                    .addRoute(DNS_SECONDARY_V6, 128)
                     .addDnsServer(DNS_PRIMARY_V6)
                     .addDnsServer(DNS_SECONDARY_V6)
+                ROUTED_RESOLVERS_V6.forEach { builder.addRoute(it, 128) }
             }
 
             addBypassedApplication(builder, packageName)
@@ -689,8 +716,9 @@ class FreedomVpnService : VpnService() {
      *
      * We only care about UDP packets to port 53 (DNS), over IPv4 or IPv6.
      *
-     * ponytail: DoH/DoT bypass the tunnel entirely. DoH bootstrap hostnames
-     * are refused by DomainBlocklist; hardcoded-IP resolvers remain a hole.
+     * ponytail: DoH/DoT to an address outside ROUTED_RESOLVERS_* bypass the
+     * tunnel entirely. DoH bootstrap hostnames are refused by DomainBlocklist;
+     * a resolver at any other hardcoded IP remains a hole.
      */
     private fun processIpPacket(
         packet: ByteBuffer,
@@ -701,11 +729,12 @@ class FreedomVpnService : VpnService() {
         val ip = parseUdpPacket(rawData, length)
         if (ip == null) {
             // Everything addressed to the resolver /32s enters this tunnel, but
-            // only UDP DNS is served. A TCP SYN here is either a DNS-over-TCP
-            // fallback or Android's opportunistic Private DNS probing DoT on
-            // :853; dropping it left the client hanging until its timeout on
-            // every network change. Answer with RST so it fails in milliseconds
-            // and the resolver falls back to UDP, which is filtered.
+            // only UDP DNS is served. A TCP SYN here is a DNS-over-TCP
+            // fallback, Android's Private DNS probing DoT on :853, or DoH on
+            // :443 to a routed resolver; dropping it left the client hanging
+            // until its timeout on every network change. Answer with RST so it
+            // fails in milliseconds and the resolver falls back to UDP, which
+            // is filtered.
             // ponytail: RST, not a relay. Serving TCP DNS would mean a userspace
             // TCP stack; add one only if a truncated (TC) answer ever matters.
             parseTcpSyn(rawData, length)?.let { syn ->

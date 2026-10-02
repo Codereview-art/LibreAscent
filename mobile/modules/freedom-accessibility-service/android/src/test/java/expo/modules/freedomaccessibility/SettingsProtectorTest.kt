@@ -20,4 +20,25 @@ class SettingsProtectorTest {
 
         assertTrue(protector.shouldBlockSettingsTextsForTest(texts))
     }
+
+    @Test
+    fun privateDnsDialogIsBlockedWithoutAnyLibreAscentText() {
+        val protector = SettingsProtector()
+        // Settings' Private DNS dialog as rendered: it never names this app.
+        val texts = listOf(
+            "Private DNS", "Off", "Automatic", "Private DNS provider hostname",
+            "Enter hostname of DNS provider", "Cancel", "Save"
+        )
+
+        assertTrue(protector.shouldBlockSettingsTextsForTest(texts))
+    }
+
+    @Test
+    fun networkPageListingPrivateDnsIsNotBlocked() {
+        val protector = SettingsProtector()
+        // The Network & internet list shows the Private DNS row, not the dialog.
+        val texts = listOf("Network & internet", "Private DNS", "Automatic", "VPN", "LibreAscent")
+
+        assertFalse(protector.shouldBlockSettingsTextsForTest(texts))
+    }
 }
