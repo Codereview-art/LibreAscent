@@ -3,6 +3,7 @@ import { APP_THEMES } from "@/constants/overlay-themes";
 import { checkpointWal, flushBlockedStats } from "@/db/database";
 import { AppThemeProvider } from "@/providers/ThemeProvider";
 import * as FreedomAccessibility from "@/modules/freedom-accessibility-service/src";
+import * as FreedomForeground from "@/modules/freedom-foreground-service/src";
 import { LaunchRecoveryService } from "@/services/LaunchRecoveryService";
 import { BlocklistService } from "@/services/BlocklistService";
 import { ProtectionService } from "@/services/ProtectionService";
@@ -78,6 +79,13 @@ export default function RootLayout(): ReactNode {
       accessibility: false,
       overlay: false,
       foregroundService: false,
+    });
+    // The boot receiver keeps its own auto-start flag; push the persisted
+    // choice so a switch flipped in an earlier build takes effect.
+    void FreedomForeground.setAutoStart(
+      useAppStore.getState().autoStartOnBoot,
+    ).catch(() => {
+      /* ignore */
     });
   }, [storesHydrated]);
 

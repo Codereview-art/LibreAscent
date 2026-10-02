@@ -38,7 +38,9 @@ export function AppLockScreen({
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: "Unlock LibreAscent",
         fallbackLabel: "Use password",
-        disableDeviceFallback: true,
+        // A lost fingerprint must not lock the owner out for good; the device
+        // credential is the fallback.
+        disableDeviceFallback: false,
       });
       if (result.success) {
         void Haptics.notificationAsync(

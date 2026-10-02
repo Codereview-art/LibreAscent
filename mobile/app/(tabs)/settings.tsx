@@ -229,7 +229,13 @@ export default function SettingsScreen(): ReactNode {
 
   const toggleBoot = (): void => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setAutoStart(!autoStartOnBoot);
+    const next = !autoStartOnBoot;
+    setAutoStart(next);
+    // The boot receiver keeps its own flag; without this the switch only ever
+    // changed the JS copy.
+    void FreedomForeground.setAutoStart(next).catch((e: unknown) => {
+      console.warn("[Settings] Auto-start sync failed:", e);
+    });
     setPendingAction(null);
   };
 
