@@ -15,6 +15,7 @@ import {
   useBlockingStore,
 } from "@/stores/useBlockingStore";
 import { BlocklistService } from "./BlocklistService";
+import { isWithinSchedule } from "./scheduleWindow";
 
 /**
  * ProtectionService — High-level bridge to native protection modules.
@@ -181,7 +182,13 @@ export const ProtectionService = {
                 ...appState.overlayTexts,
               });
 
-              await Promise.all([
+              // The Hardcore flag keeps the uninstall and admin pages closed;
+              // it lands before the rest so a failed push cannot skip it.
+              const controlMode = appState.controlMode;
+              await FreedomAccessibility.updateHardcoreMode(
+                controlMode === "hardcore",
+              );
+              const results = await Promise.allSettled([
                 ProtectionService.syncBrowserConfigs(),
                 ProtectionService.syncReelsConfigs(),
                 ProtectionService.syncNsfwApps(),
@@ -190,11 +197,14 @@ export const ProtectionService = {
                 FreedomAccessibility.updateOverlayTheme(themeJson),
                 FreedomOverlay.updateOverlayTheme(themeJson),
               ]);
-
-              const controlMode = appState.controlMode;
-              await FreedomAccessibility.updateHardcoreMode(
-                controlMode === "hardcore",
-              );
+              for (const result of results) {
+                if (result.status === "rejected") {
+                  console.warn(
+                    "[ProtectionService] Partial sync failure:",
+                    result.reason,
+                  );
+                }
+              }
               // eslint-disable-next-line no-console
               console.log("[ProtectionService] Synced configs", {
                 includedUrls: activeIncluded.length,
@@ -302,41 +312,8 @@ export const ProtectionService = {
   /**
    * Check if protection should be active based on current schedule.
    */
-  isProtectionEnabledBySchedule: (): boolean => {
-    const schedules = useAppStore.getState().schedule;
-    if (schedules.length === 0) return true;
-
-    const activeSchedules = schedules.filter((s) => s.enabled);
-    if (activeSchedules.length === 0) return true;
-
-    const now = new Date();
-    const currentDay = now.getDay();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const currentTimeMinutes = currentHour * 60 + currentMinute;
-
-    return activeSchedules.some((s) => {
-      if (s.day !== currentDay) return false;
-
-      const [startH, startM] = s.startTime.split(":").map(Number);
-      const [endH, endM] = s.endTime.split(":").map(Number);
-
-      const startTimeMinutes = startH * 60 + startM;
-      const endTimeMinutes = endH * 60 + endM;
-
-      if (startTimeMinutes > endTimeMinutes) {
-        return (
-          currentTimeMinutes >= startTimeMinutes ||
-          currentTimeMinutes <= endTimeMinutes
-        );
-      }
-
-      return (
-        currentTimeMinutes >= startTimeMinutes &&
-        currentTimeMinutes <= endTimeMinutes
-      );
-    });
-  },
+  isProtectionEnabledBySchedule: (): boolean =>
+    isWithinSchedule(useAppStore.getState().schedule, new Date()),
 
   /**
    * Subscribe to VPN status changes.

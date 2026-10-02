@@ -68,6 +68,7 @@ export default function BlockWebsitesScreen(): ReactNode {
   const [searchQuery, setSearchQuery] = useState("");
   const [displayLimit, setDisplayLimit] = useState(50);
   const [showModeModal, setShowModeModal] = useState(false);
+  const [pendingNsfwPkg, setPendingNsfwPkg] = useState<string | null>(null);
 
   const { controlMode, surveillance } = useAppStore();
 
@@ -100,6 +101,20 @@ export default function BlockWebsitesScreen(): ReactNode {
     siteControlMode,
     siteSurveillance,
   );
+
+  const handleToggleNsfwApp = (packageName: string): void => {
+    // Turning monitoring on is free; turning it off is a weakening and takes
+    // the section's friction, as on the Reels screen.
+    if (
+      !enabledNsfwApps.includes(packageName) ||
+      effectiveMode === "flexible"
+    ) {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      toggleNsfwApp(packageName);
+    } else {
+      setPendingNsfwPkg(packageName);
+    }
+  };
 
   // Local pending state for control mode modal
   const [pendingMode, setPendingMode] = useState<ControlMode>(siteControlMode);
@@ -712,10 +727,7 @@ export default function BlockWebsitesScreen(): ReactNode {
                 <Pressable
                   key={app.packageName}
                   onPress={() => {
-                    void Haptics.impactAsync(
-                      Haptics.ImpactFeedbackStyle.Medium,
-                    );
-                    toggleNsfwApp(app.packageName);
+                    handleToggleNsfwApp(app.packageName);
                   }}
                   className="flex-row items-center p-4 rounded-xl mb-2"
                   style={{
@@ -1169,6 +1181,20 @@ export default function BlockWebsitesScreen(): ReactNode {
         }}
         onCancel={() => {
           setModeGuardVisible(false);
+        }}
+      />
+
+      {/* Guard for turning keyword monitoring off */}
+      <InteractionGuard
+        visible={pendingNsfwPkg !== null}
+        actionName="Stop Monitoring App"
+        surveillanceOverride={effectiveSurveillance}
+        onSuccess={() => {
+          if (pendingNsfwPkg) toggleNsfwApp(pendingNsfwPkg);
+          setPendingNsfwPkg(null);
+        }}
+        onCancel={() => {
+          setPendingNsfwPkg(null);
         }}
       />
     </SafeAreaView>

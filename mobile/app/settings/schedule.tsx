@@ -1,5 +1,6 @@
 import { InteractionGuard } from "@/components/InteractionGuard";
 import { useAppTheme } from "@/providers/ThemeProvider";
+import { scheduleToggleNeedsFriction } from "@/services/scheduleWindow";
 import { useAppStore } from "@/stores/useAppStore";
 import type { ScheduleEntry } from "@/types/blocking";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,8 +27,11 @@ export default function ScheduleScreen(): ReactNode {
     "Saturday",
   ];
 
-  const handleTogglePress = (dayIndex: number, isEnabling: boolean): void => {
-    if (controlMode === "flexible" || isEnabling) {
+  const handleTogglePress = (dayIndex: number): void => {
+    if (
+      controlMode === "flexible" ||
+      !scheduleToggleNeedsFriction(schedule, dayIndex)
+    ) {
       toggleDay(dayIndex);
     } else {
       setPendingDay(dayIndex);
@@ -110,8 +114,8 @@ export default function ScheduleScreen(): ReactNode {
                   </Text>
                   <Switch
                     value={entry?.enabled || false}
-                    onValueChange={(val) => {
-                      handleTogglePress(index, val);
+                    onValueChange={() => {
+                      handleTogglePress(index);
                     }}
                     trackColor={{ false: "#ccc", true: t.accentColor }}
                     thumbColor={entry?.enabled ? "#fff" : "#999"}
