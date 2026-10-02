@@ -12,6 +12,7 @@ import android.view.accessibility.AccessibilityNodeInfo
  * 1. Uninstalling the Freedom app
  * 2. Deactivating the Freedom Device Admin receiver
  * 3. Disabling the Freedom Accessibility Service
+ * 4. Pointing Private DNS at a resolver the Freedom VPN never sees
  *
  * Uses manual node tree traversal instead of findAccessibilityNodeInfosByText,
  * because Compose-based Settings (SpaActivity on Android 14+) doesn't support
@@ -62,6 +63,14 @@ class SettingsProtector {
             "stop libreascent",
             "turn off libreascent",
             "use libreascent"
+        )
+
+        // The provider-hostname option of Settings' Private DNS dialog. A strict
+        // hostname moves every lookup to DNS-over-TLS at an address the tunnel
+        // never sees, so in Hardcore the dialog is closed before one can be set.
+        // The dialog never mentions LibreAscent, so it is checked ahead of that gate.
+        private val PRIVATE_DNS_TRIGGERS = listOf(
+            "private dns provider hostname"
         )
 
         private val SETTINGS_PKGS = listOf(
@@ -144,6 +153,12 @@ class SettingsProtector {
             return
         }
 
+        if (containsAny(allText, PRIVATE_DNS_TRIGGERS)) {
+            Log.w(TAG, "Protection: Private DNS dialog! Navigating back.")
+            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            return
+        }
+
         val freedomFound = containsFreedom(allText)
         if (!freedomFound) return
 
@@ -164,10 +179,11 @@ class SettingsProtector {
     }
 
     internal fun shouldBlockSettingsTextsForTest(texts: List<String>): Boolean {
-        return containsFreedom(texts) &&
-            (containsAny(texts, APP_INFO_TRIGGERS) ||
-                containsAny(texts, DEVICE_ADMIN_TRIGGERS) ||
-                shouldBlockAccessibilitySettings(texts))
+        return containsAny(texts, PRIVATE_DNS_TRIGGERS) ||
+            (containsFreedom(texts) &&
+                (containsAny(texts, APP_INFO_TRIGGERS) ||
+                    containsAny(texts, DEVICE_ADMIN_TRIGGERS) ||
+                    shouldBlockAccessibilitySettings(texts)))
     }
 
     private fun shouldBlockAccessibilitySettings(texts: List<String>): Boolean {

@@ -1,5 +1,8 @@
 package expo.modules.freedomvpn
 
+import java.net.Inet4Address
+import java.net.Inet6Address
+import java.net.InetAddress
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertContentEquals
@@ -21,6 +24,42 @@ class FreedomVpnServiceTest {
     fun defaultBypassedPackagesIncludeWhatsAppVariants() {
         assertContains(FreedomVpnService.DEFAULT_BYPASSED_PACKAGES, "com.whatsapp")
         assertContains(FreedomVpnService.DEFAULT_BYPASSED_PACKAGES, "com.whatsapp.w4b")
+    }
+
+    @Test
+    fun routedResolversCoverTheMajorPublicResolversAsSingleHosts() {
+        val v4 = FreedomVpnService.ROUTED_RESOLVERS_V4
+        val v6 = FreedomVpnService.ROUTED_RESOLVERS_V6
+
+        for (ip in listOf(
+            "1.1.1.1", "1.0.0.1",
+            "8.8.8.8", "8.8.4.4",
+            "9.9.9.9", "149.112.112.112",
+            "208.67.222.222", "208.67.220.220",
+            "94.140.14.14", "94.140.15.15",
+            "76.76.2.0", "76.76.10.0",
+            "185.228.168.9", "185.228.169.9"
+        )) {
+            assertContains(v4, ip)
+        }
+        for (ip in listOf(
+            "2606:4700:4700::1111", "2606:4700:4700::1001",
+            "2001:4860:4860::8888", "2001:4860:4860::8844",
+            "2620:fe::fe", "2620:fe::9",
+            "2620:119:35::35", "2620:119:53::53",
+            "2a10:50c0::ad1:ff", "2a10:50c0::ad2:ff",
+            "2606:1a40::", "2606:1a40:1::",
+            "2a0d:2a00:1::2", "2a0d:2a00:2::2"
+        )) {
+            assertContains(v6, ip)
+        }
+
+        // Each entry must be a literal of its own family: addRoute(ip, 32) on
+        // an IPv6 literal would route a /32 of someone's address space, and
+        // the point of this list is single hosts so carrier/IMS traffic stays
+        // out of the tunnel.
+        v4.forEach { assertTrue(InetAddress.getByName(it) is Inet4Address, it) }
+        v6.forEach { assertTrue(InetAddress.getByName(it) is Inet6Address, it) }
     }
 
     @Test
