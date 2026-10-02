@@ -12,6 +12,8 @@ import android.view.accessibility.AccessibilityNodeInfo
  * 1. Uninstalling the Freedom app
  * 2. Deactivating the Freedom Device Admin receiver
  * 3. Disabling the Freedom Accessibility Service
+ * 4. Revoking the DNS tunnel's VPN consent (Forget VPN, or consenting to
+ *    another VPN app), which nothing in the app can restore unattended
  *
  * Uses manual node tree traversal instead of findAccessibilityNodeInfosByText,
  * because Compose-based Settings (SpaActivity on Android 14+) doesn't support
@@ -63,6 +65,21 @@ class SettingsProtector {
             "turn off libreascent",
             "use libreascent"
         )
+
+        // The VPN detail page for LibreAscent. "Forget VPN" revokes the
+        // tunnel's consent for good; a list page that merely shows
+        // LibreAscent as connected never carries this text.
+        private val VPN_TRIGGERS = listOf("forget vpn")
+
+        // The system consent dialog names the requesting app in the same
+        // string as "VPN", so a tree with no VPN text has not rendered yet
+        // and is never mistaken for another app's request.
+        private val VPN_DIALOG_TRIGGERS = listOf("vpn")
+
+        // Loose match for our own label. The dialog rule is inverted (it
+        // blocks when LibreAscent is NOT named), so a whole-word miss would
+        // bounce our own request; some locales glue or quote the label.
+        private val VPN_DIALOG_OWN_APP = listOf("libreascent")
 
         private val SETTINGS_PKGS = listOf(
             "settings", "manageapp", "applications", "com.google.android.settings"
@@ -127,6 +144,17 @@ class SettingsProtector {
             return
         }
 
+        // --- Handle the system VPN consent dialog ---
+        if (pkg.contains("vpndialogs")) {
+            // Inverted rule: never judge a root that is not the dialog's own window.
+            if (rootNode.packageName?.toString()?.contains("vpndialogs") != true) return
+            if (shouldBlockVpnDialog(collectAllText(rootNode))) {
+                Log.w(TAG, "Protection: VPN consent request for another app! Navigating back.")
+                service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            }
+            return
+        }
+
         // --- Handle Settings app ---
         if (!SETTINGS_PKGS.any { pkg.contains(it) }) return
 
@@ -154,6 +182,13 @@ class SettingsProtector {
             return
         }
 
+        // VPN detail page for Freedom
+        if (containsAny(allText, VPN_TRIGGERS)) {
+            Log.w(TAG, "Protection: Forget VPN for Freedom! Navigating back.")
+            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            return
+        }
+
         // Accessibility settings for Freedom. Keep this narrow: network/VPN
         // settings can show "LibreAscent" and "Off" without being tamper UI.
         if (shouldBlockAccessibilitySettings(allText)) {
@@ -167,7 +202,16 @@ class SettingsProtector {
         return containsFreedom(texts) &&
             (containsAny(texts, APP_INFO_TRIGGERS) ||
                 containsAny(texts, DEVICE_ADMIN_TRIGGERS) ||
+                containsAny(texts, VPN_TRIGGERS) ||
                 shouldBlockAccessibilitySettings(texts))
+    }
+
+    internal fun shouldBlockVpnDialogTextsForTest(texts: List<String>): Boolean {
+        return shouldBlockVpnDialog(texts)
+    }
+
+    private fun shouldBlockVpnDialog(texts: List<String>): Boolean {
+        return containsAny(texts, VPN_DIALOG_TRIGGERS) && !containsAny(texts, VPN_DIALOG_OWN_APP)
     }
 
     private fun shouldBlockAccessibilitySettings(texts: List<String>): Boolean {
